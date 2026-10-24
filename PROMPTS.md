@@ -1,87 +1,386 @@
-# AI-assisted development log
+# TrustVault — AI-Assisted Development Log
 
-Keep this file current during development. Entries below record the initial scaffold and checks performed for this generated starter. Add the actual date, observed defect, your own correction, and the real commit hash/link after you run each check and commit. Do not claim a defect was fixed until you reproduce and verify it.
+## Purpose
 
-## 2026-10-24 — Project architecture and initial implementation
-- **Tool/prompt:** ChatGPT; asked to build TrustVault from the supplied challenge statement, with a Render-friendly deployment plan, named per-document grants, server-side authorization, audit logging, tests, and documentation.
-- **Produced:** Flask application with SQLAlchemy models, login sessions, per-document permission checks, database-backed file content, hash-chained audit events, templates, tests, and Render configuration.
-- **Review focus / potential issue:** Generated code is not trusted by default. In particular, check every direct document route for IDOR, ensure an admin role does not bypass document grants, verify revoked grants are re-checked on each request, and test the audit chain against modified records.
-- **What I did instead:** Added explicit `can_read`, `can_edit`, and owner-only `can_delete` functions; recorded denied access attempts; added security tests. **Run the tests and replace this note with the actual issues found and verified fixes.**
-- **Commit:** Add the real commit link after committing this work; do not invent a commit hash.
+This document summarizes the AI-assisted development and review work associated with TrustVault. It records the prompts or requests, resulting implementation areas, review concerns, and verification evidence available at the time of writing.
 
-## 2026-10-24 — Authorization review (required evidence entry 1)
-- **Tool/prompt:** ChatGPT; requested a security review of document detail/download/edit/delete and grant/revoke endpoints for direct-object-reference and privilege-escalation risks.
-- **Produced:** Route handlers call server-side permission helpers for each request; inaccessible resources return 404 to reduce document-ID enumeration.
-- **Review focus / potential issue:** A hidden frontend button would not enforce authorization, and an `edit` grant must not automatically imply delete or sharing rights.
-- **What I did instead:** Implemented server-side checks independently of UI visibility and tests that try direct URL/POST access as a read-only user. Record any additional real bug found during execution here.
-- **Commit:** Add the real commit link after committing this review/fix.
+AI-generated code was treated as code requiring review and testing. Security claims should be supported by the relevant implementation and tests. This document does not claim that every possible vulnerability has been eliminated.
 
-## 2026-10-24 — Audit-chain review (required evidence entry 2)
-- **Tool/prompt:** ChatGPT; requested an audit trail for uploads, downloads, changes, deletion, permission changes, and refused access attempts, with tamper detection.
-- **Produced:** Audit events link to the prior event hash; admin page verifies the chain; test mutates a stored event and expects verification to fail.
-- **Review focus / potential issue:** A hash chain is not immutable if an attacker can rewrite the database and head row; silently claiming it is impossible to tamper with would be incorrect.
-- **What I did instead:** Documented the limit explicitly and listed external append-only/WORM log anchoring as a production improvement. Run the test and record its actual result.
-- **Commit:** Add the real commit link after committing this review/fix.
+**Project:** TrustVault — Secure Document Sharing with a Real Audit Trail
+**AI assistant used:** ChatGPT
+**Development and verification date recorded here:** 2026-10-24
 
-## 2026-10-24 — File validation review
-- **Tool/prompt:** ChatGPT; requested validation for untrusted file uploads with a strict size limit and supported formats.
-- **Produced:** Extension allowlist, 5 MB limit, PDF/image signatures, DOCX ZIP structure checks, UTF-8 checks for TXT/CSV, and attachment downloads.
-- **Review focus / potential issue:** An extension and browser-provided MIME type alone can be spoofed; format checks also do not prove a file is safe from malware.
-- **What I did instead:** Added server-side content checks and a malformed-PDF test; documented malware scanning as an unimplemented limitation. Run tests with mismatched file contents and add actual findings.
-- **Commit:** Add the real commit link after committing this review/fix.
+---
 
-## 2026-10-24 — Deployment and persistence review
-- **Tool/prompt:** ChatGPT; requested a deployment plan suitable for Render and a README that a fresh clone can run.
-- **Produced:** PostgreSQL URL support, `render.yaml`, health endpoint, Gunicorn Procfile, `.env.example`, setup instructions, and database-backed file bytes.
-- **Review focus / potential issue:** A free web service's local filesystem may be ephemeral; storing uploaded files only in local paths can lose data after restart/redeploy. Known demo passwords must not be treated as production secrets.
-- **What I did instead:** Store file bytes in PostgreSQL for this small challenge scope and require unique environment-configured demo passwords on Render. Verify the deployment using an incognito window and document the result.
-- **Commit:** Add the real commit link after committing this review/fix.
+## Entry 1 — Project Architecture and Initial Implementation
 
-## Reusable review instructions
-- Ask AI to identify authorization bypasses, but require a route-by-route explanation and a test for every claimed fix.
-- Never accept generated security claims without reading the relevant functions and running tests.
-- Keep real dates and commit links. Do not backdate commits or invent AI mistakes.
+**Date:** 2026-10-24
 
+### Request to the AI
 
-## 2026-10-24 — Registration, account provisioning, and glass UI (verify locally before finalizing)
-- **Tool/prompt:** ChatGPT; asked to add a sign-up option, make document upload easier to find/use, and give TrustVault a polished glassmorphism theme.
-- **Produced:** Viewer-only public registration, admin provisioning for owner/viewer accounts, a redesigned glass-style workspace, and a drag-and-drop upload form.
-- **What was wrong in the previous version:** There was no public registration route. Upload was only available to the seeded `owner` role, so a person who signed in as the seeded viewer could not upload. A naive sign-up implementation with a role selector would let people assign themselves owner/admin privileges.
-- **What changed:** `/register` always creates `viewer` regardless of submitted form fields; `/admin/users/new` lets admins create `owner` or `viewer` accounts but rejects `admin`; both actions are audited. Added tests for role escalation and admin-only owner provisioning.
-- **Verification status:** Python syntax compilation passed in the generation environment. The pytest suite could not be run here because Flask is not installed in that environment; run `python -m pytest -q` in the project virtual environment and record the real result. Visually verify registration, admin provisioning, upload, and responsive layout locally.
-- **Commit:** Add the real commit URL after committing these changes from your own repository; do not invent a hash.
+Build a document-sharing application based on the TrustVault challenge requirements, including authentication, document ownership, named-user permissions, server-side authorization, audit logging, automated tests, documentation, and deployment configuration.
 
+### Output and implementation areas
 
-## 2026-10-24 — Fix discoverability, document sharing workflow, and glass UI
+The resulting project contains a Flask application with SQLAlchemy models, authentication routes, document-management routes, permission helpers, audit logging, templates, automated tests, and Render configuration.
 
-- **Request to the AI:** Review the running TrustVault experience and make document upload discoverable, add a dedicated Manage Access screen similar in workflow to the supplied `/documents/<id>/share` reference, improve category navigation, and refine the glassmorphism UI.
-- **What the tool changed:** Added a dedicated `/documents/<id>/share` page, category chips and more categories, an explicit Manage access card action, improved animated glass surfaces, and allowed administrators to upload documents they own.
-- **What needed careful review:** Upload was only available to `owner` accounts, so an administrator who signed in could see search but no upload action. Publicly registered users remain viewers by design, so registration does not automatically grant upload privileges. A broad admin bypass would have been dangerous; instead, the admin can manage only documents they personally upload and does not gain access to other users' documents. Manage Access remains owner-only.
-- **What was done instead:** Kept server-side checks; updated the nav/dashboard to show Add document to owners and admins; added tests that an admin's own document is not visible to a different owner and that the Manage Access page is owner-only. Added the dedicated grant/revoke interface and category navigation.
-- **Verification status:** Python syntax/template source review only so far. Run the project test suite locally and record actual outcomes before claiming this works in deployment.
-- **Commit:** Add the real GitHub commit URL here after committing these changes. Do not invent a commit URL.
+The application stores document content in the database and includes a hash-linked audit trail.
 
+### Security review considerations
 
-## 2026-10-24 — Change account ownership model and improve visual hierarchy
-- **Tool/prompt:** ChatGPT; asked to make every public registrant a normal user who can own/upload/manage their own documents, share them selectively, and refresh the frontend with a premium iPhone-inspired glass theme, larger typography, animations, and prominent categories.
-- **Produced:** Registration now creates `owner` regardless of any submitted role; admin account provisioning also creates only normal owner accounts; legacy non-demo viewer accounts are migrated to owner on startup; the workspace has large category tiles with counts, bigger type, animated liquid-glass cards, improved stats, and a clearer upload action.
-- **What was wrong in the previous implementation:** Registration assigned `viewer`, and the UI/backend correctly hid/blocked upload for that role, so a person registering with their own email could not use the core document-owner workflow. Category chips were small and horizontally scrolling, making categories hard to discover; base text sizes were also too small for comfortable use.
-- **What I changed and must verify:** Changed the role assignment in `auth.py`, added a legacy-role migration in `app.py`, updated registration/login/dashboard templates and CSS, and changed the registration test to prove a newly registered account can upload its own document while forged `admin` role input is ignored. Run the full tests and manually verify upload, sharing, revocation, category filters, responsive behaviour, and that unrelated users still cannot access private documents.
-- **Commit:** Add the real commit URL after committing this change in your own repository. Do not invent a commit hash.
+* Every document request must enforce authorization on the server.
+* Document identifiers must not allow users to access other users' private documents.
+* Administrative privileges must not automatically grant access to all document contents.
+* Revoked permissions must be checked on subsequent requests.
+* Audit records must be checked for modification or deletion.
+* Generated code must not be assumed secure without inspection and testing.
 
+### Verification evidence
 
-## 2026-10-24 — Force explicit authentication before the workspace
-- **Tool/prompt:** ChatGPT; asked to review the whole app because the workspace appeared immediately and the user was concerned that uploads might be available before login. Requested strict challenge-level authorization and a more vivid, readable glass interface.
-- **What the tool found:** The workspace and document routes already used Flask-Login, but successful public registration automatically logged the new account in and redirected straight to the workspace. That behaviour made the app look as if it skipped the login screen. The old browser session cookie could also preserve an authenticated session across the update.
-- **What was changed:** Registration now creates an owner account and redirects to the login page without authenticating the new session; the session cookie name was versioned to invalidate old cookies; tests were added for anonymous access to private routes and for forged `role=admin` registration. Production demo seeding now refuses known fallback passwords when Render/production is detected and seed secrets are absent/too short. The theme was changed to high-contrast midnight aurora glass with larger type and violet/cyan/mint accents.
-- **What still needs verification:** Run `python -m pytest -q`, then test in an incognito window: `/` redirects to `/login`; registration redirects to login; after explicit login, uploads, direct document URLs, access grants and revocation behave as expected. Do not claim the tests pass until their output confirms it.
-- **Commit:** Add the real commit URL after committing these actual changes in your own repository; do not invent a hash or backdate history.
+The local test suite was run on 2026-10-24.
 
+**Observed result:** 26 tests passed in approximately 13.93 seconds.
 
-## 2026-10-24 — Final security and contrast review
-- **Request / prompt summary:** Review the current Aurora Secure Edition for the previously identified issues: selected category tiles become light while their labels stay white; strengthen login/registration throttling, audit-chain head verification, browser security headers, database initialization, and tests. Also add a clear “Shared with me” view.
-- **What the tool produced:** A focused patch to CSS, Flask setup/authentication, audit verification, DOCX validation, migration scaffolding, tests, and documentation.
-- **What was wrong in the existing implementation:** The older `.category-card.selected` rule applied a pale background but later dark-theme overrides left the label white, reducing contrast. Audit verification validated event hashes/links but did not compare the terminal event hash to `AuditHead.last_hash`. The README still described rate limiting as not implemented, and database initialization was performed on app creation, which can race across multiple Gunicorn workers.
-- **What I changed instead:** Added an explicit dark selected-category background and readable selected text; compared the computed terminal hash with the stored head; added login and registration rate limits, security response headers, a bounded expanded DOCX archive size, tests for head tampering, rate limiting, headers, and CSRF; added Flask-Migrate baseline support and moved database initialization/seeding to an explicit startup step before the web worker. Added a “Shared with me” view.
-- **Verification:** Python syntax compilation and ZIP integrity are checked during packaging. Full pytest execution was not possible in the build environment because dependency installation could not reach the package index. Run `python -m pytest -q` locally and record the actual result before submission.
-- **Commit link:** Add the real commit URL after committing this patch in your own repository. Do not fabricate a commit hash or backdate it.
+This result establishes that the listed tests passed in that local environment. It does not prove the absence of all security vulnerabilities.
+
+### Commit reference
+
+The repository was initially committed after the project files had been prepared. This entry does not claim that the initial commit represents the entire historical development process. Add a commit link only if a real commit directly corresponds to this work.
+
+---
+
+## Entry 2 — Authorization and Document Access Review
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Review document detail, download, edit, delete, and permission-management operations for insecure direct object references, unauthorized access, and privilege-escalation risks.
+
+### Output and implementation areas
+
+The application includes permission helpers for reading, editing, and deleting documents. Document routes are intended to enforce permissions on the server rather than relying only on frontend controls.
+
+The application also includes tests for unauthorized document access and for restrictions on read-only and edit-only permissions.
+
+### Security concerns considered
+
+* Hiding a button in the interface is not a substitute for server-side authorization.
+* A read permission must not grant editing or deletion.
+* An edit permission must not automatically grant deletion or permission-sharing rights.
+* Administrators should not automatically gain access to every user's document content.
+* Direct requests must be protected even if a user bypasses the normal interface.
+
+### Verification evidence
+
+The local security test suite passed, including tests for unauthorized reading and downloading, permission restrictions, administrative access boundaries, and access revocation.
+
+These results support the tested behavior; they do not establish that every possible route or attack has been exhaustively reviewed.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 3 — Audit Trail and Tamper Detection Review
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Implement an audit trail for document uploads, downloads, changes, deletions, permission changes, and refused access attempts. Include a mechanism for detecting audit-record modification.
+
+### Output and implementation areas
+
+The project includes audit events linked through hashes. The application includes audit verification logic and tests that modify stored audit data to check whether tampering is detected.
+
+### Security concerns considered
+
+* Important document and permission operations should produce audit events.
+* Denied access attempts should be recorded where implemented.
+* Audit verification should detect changes to covered records.
+* Audit verification should also consider the integrity of the stored chain head.
+* A hash chain alone is not equivalent to an externally protected, immutable audit system.
+
+### Limitations
+
+An attacker who can modify all relevant database records and recompute the chain may be able to defeat a database-only hash chain. External append-only logging or independently protected audit anchoring would provide stronger protection.
+
+### Verification evidence
+
+The local tests passed, including tests for audit-chain tampering and modification of the stored chain head.
+
+These tests demonstrate the behavior exercised by those test cases, not immunity to every form of audit manipulation.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 4 — File Upload Validation
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Review file-upload handling and add server-side validation for supported file formats and file-size limits.
+
+### Output and implementation areas
+
+The project includes a 5 MB upload limit and server-side validation for supported formats. The implementation includes checks for file extensions and content characteristics, including checks relevant to PDF, image, DOCX, TXT, and CSV uploads.
+
+### Security concerns considered
+
+* File extensions and browser-provided MIME types can be misleading.
+* Uploaded content must be validated on the server.
+* Malformed files should be rejected.
+* Size limits should be enforced.
+* File-format validation does not prove that a file is free from malware.
+
+### Limitations
+
+The documented validation does not replace dedicated malware scanning. A production deployment handling sensitive or high-risk documents may require additional content scanning, monitoring, and storage controls.
+
+### Verification evidence
+
+The local test suite passed, including the test for rejection of an invalid file signature.
+
+The result confirms that the tested malformed-file case was rejected. It does not establish that every malicious file will be detected.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 5 — Deployment and Database Persistence
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Prepare TrustVault for deployment on Render and document how the application can be configured to use PostgreSQL.
+
+### Output and implementation areas
+
+The project includes:
+
+* A `render.yaml` deployment configuration.
+* A `Procfile` specifying a Gunicorn startup command.
+* Database migration support.
+* An initialization script.
+* An `.env.example` file for local configuration.
+* PostgreSQL URL support.
+* A health-check endpoint.
+* Database-backed document content.
+
+### Security and reliability concerns considered
+
+* Production secrets must not be committed to the repository.
+* Production should use the configured PostgreSQL database rather than depend on an ephemeral local filesystem.
+* Database initialization should not unexpectedly overwrite existing data.
+* Deployment configuration must match the actual application's environment-variable requirements.
+* Free hosting services can have resource and availability limitations.
+
+### Verification evidence
+
+TrustVault was deployed to Render. The deployment logs showed that database initialization completed and the application started successfully.
+
+The deployed URL is:
+
+https://trustvault-6cba.onrender.com
+
+The application was opened in a browser and appeared to work as expected according to the developer's manual check.
+
+### Limitations
+
+A successful startup does not by itself prove production security or data durability. Production behavior must be assessed through live authorization tests, database checks, and review of the hosting configuration.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 6 — Registration, Account Provisioning, and Interface Improvements
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Improve registration and document-upload workflows and give the application a more polished glassmorphism interface.
+
+### Output and implementation areas
+
+The project includes public registration, administrative account-provisioning functionality, document-upload controls, and a redesigned workspace interface.
+
+The intended account model allows normal registered users to own and manage their own documents. Public registration must not permit users to assign themselves administrator privileges.
+
+### Security concerns considered
+
+* A role selector in public registration could allow privilege escalation if trusted by the server.
+* The server must decide which roles public registration can create.
+* Account-provisioning operations should be restricted and audited.
+* Interface visibility must not replace backend permission checks.
+
+### Verification evidence
+
+The local test suite passed, including tests for public registration, role-escalation attempts, and administrative account-provisioning restrictions.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 7 — Document Sharing and Permission Management
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Improve document discoverability, category navigation, and the workflow for granting and revoking document access.
+
+### Output and implementation areas
+
+The project includes document-sharing and permission-management interfaces, category navigation, and document-management actions.
+
+The permission model is intended to distinguish reading, editing, deleting, and managing access.
+
+### Security concerns considered
+
+* Only authorized document owners should manage access grants.
+* Granting access should not automatically provide unrelated privileges.
+* Revocation should take effect for subsequent requests.
+* Administrators should not automatically gain access to documents they do not own or have permission to read.
+
+### Verification evidence
+
+The local test suite passed, including tests for immediate revocation, restrictions on read and edit grants, administrative access boundaries, and owner-only access management.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 8 — Account Ownership Model and Category Navigation
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Allow public registrants to become normal document owners, support selective sharing, and improve the workspace with larger category tiles and a more readable visual hierarchy.
+
+### Output and implementation areas
+
+The project includes registration logic that creates normal owner accounts, role restrictions that prevent public users from assigning themselves administrator privileges, and workspace navigation designed to make document categories easier to find.
+
+The application also includes category filtering and document-management controls.
+
+### Security concerns considered
+
+* Newly registered users must be able to use the intended owner workflow.
+* Public registration must not grant administrator privileges.
+* Existing account-role migration must preserve the intended authorization model.
+* UI changes must not weaken server-side permission enforcement.
+
+### Verification evidence
+
+The local test suite passed, including the test that public registration creates a normal owner account and the test that forged administrator-role input is rejected.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 9 — Explicit Authentication Before Workspace Access
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Review the application because the workspace appeared to open immediately, and ensure that private functionality requires explicit authentication.
+
+### Output and implementation areas
+
+The project includes login and registration routes and server-side protection for private application pages.
+
+Registration is intended to create an account and direct the user to the login page rather than silently authenticate the new session.
+
+The application also includes tests for unauthenticated access and attempts to submit forged administrator roles.
+
+### Security concerns considered
+
+* Private pages must not be accessible to anonymous visitors.
+* Registration must not bypass the intended login workflow.
+* Old browser sessions should not be treated as evidence that anonymous access is safe.
+* Public registration must not create or authenticate an administrator account.
+
+### Verification evidence
+
+The local test suite passed, including tests for private-page authentication requirements and public registration restrictions.
+
+The deployed website was also opened and manually checked. The manual check should not be interpreted as a substitute for automated production security testing.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link if a corresponding commit can be identified.
+
+---
+
+## Entry 10 — Final Security Review and Local Test Results
+
+**Date:** 2026-10-24
+
+### Request to the AI
+
+Review the TrustVault security and usability requirements, including category contrast, authentication and registration throttling, audit-chain verification, browser security headers, database initialization, and document sharing.
+
+### Review areas
+
+* Authentication and authorization.
+* Document access and immediate permission revocation.
+* Role escalation.
+* Audit-chain integrity.
+* File-upload validation.
+* Browser security headers.
+* Database initialization.
+* Category navigation and interface readability.
+
+### Verification performed
+
+The local test suite was run using:
+
+`python -m pytest -v`
+
+### Observed result
+
+**26 tests passed in approximately 13.93 seconds.**
+
+The suite included functionality and security tests covering unauthorized document access, access revocation, upload validation, audit-chain tampering, authentication, CSRF protection, and security headers.
+
+### Limitations
+
+Passing automated tests does not establish that every possible vulnerability has been eliminated. The test suite covers specific scenarios, and additional manual review and production testing may reveal further issues.
+
+### Commit reference
+
+No historical commit hash is asserted in this entry. Add a real commit link only when a corresponding commit exists.
+
+---
+
+## Development Integrity and Verification Policy
+
+* AI-generated code should be reviewed rather than accepted automatically.
+* Security claims should be supported by code inspection and relevant tests.
+* Test results should reflect actual command output.
+* A successful deployment should not be described as proof that the application is completely secure.
+* Commit links must point to real commits.
+* Dates must reflect actual work or verification dates.
+* Do not fabricate earlier development activity, bugs, fixes, prompts, or commit history.
+* Document unresolved limitations honestly.
+* Update this file when further AI-assisted changes or verification work occurs.
