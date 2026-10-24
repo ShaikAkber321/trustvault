@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block title %}{{ code }} · TrustVault{% endblock %}{% block content %}<section class="auth-card"><p class="eyebrow">REQUEST NOT COMPLETED</p><h1>{{ code }}</h1><p>{{ message }}</p><a class="primary button" href="{{ url_for('documents.index') if current_user.is_authenticated else url_for('auth.login') }}">Return</a></section>{% endblock %}

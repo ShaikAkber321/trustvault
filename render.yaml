@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: trustvault
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask --app app db upgrade && python init_db.py && gunicorn app:app --workers 1 --threads 4 --timeout 60
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trustvault-db
+          property: connectionString
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_OWNER_PASSWORD
+        sync: false
+      - key: SEED_VIEWER_PASSWORD
+        sync: false
+      - key: MAX_CONTENT_LENGTH
+        value: "5242880"
+      - key: RATELIMIT_STORAGE_URI
+        value: memory://
+databases:
+  - name: trustvault-db
+    databaseName: trustvault
+    user: trustvault
+    plan: free

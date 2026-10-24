@@ -1,0 +1,9 @@
+{% extends 'base.html' %}{% block title %}Sign in · TrustVault{% endblock %}
+{% block content %}
+<section class="auth-shell">
+  <div class="auth-aside"><span class="security-orb">✦</span><p class="eyebrow">YOUR DOCUMENTS. YOUR RULES.</p><h1>Private files.<br><span>Clear control.</span></h1><p>One secure place for sensitive documents, explicit access grants, and an audit trail you can verify.</p><div class="trust-points"><span>✓ Access checked on every request</span><span>✓ Sharing can be revoked immediately</span><span>✓ Important actions leave a record</span></div></div>
+  <div class="auth-card glass"><div class="auth-icon">↗</div><p class="eyebrow">WELCOME BACK</p><h2>Sign in to your vault</h2><p class="muted">Use your registered email and password.</p>
+    <form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Email address<input name="email" type="email" autocomplete="username" required maxlength="254" placeholder="you@company.com"></label><label>Password<input name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"></label><button class="primary full" type="submit">Sign in securely <span>→</span></button></form>
+    <p class="auth-switch">New to TrustVault? <a href="{{ url_for('auth.register') }}">Create your workspace</a></p><p class="small muted auth-note">New accounts can own and share their own documents. Administrator privileges are restricted.</p>
+  </div>
+</section>{% endblock %}
