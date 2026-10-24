@@ -1,94 +1,217 @@
 # TrustVault Threat Model
 
-**Status:** initial threat model; update it as tests and deployment checks uncover more. Scope is this application and its own deployment only.
+**Status:** Initial threat model with implementation and verification notes. This document covers the TrustVault application and its deployment. Security claims should be supported by code inspection, automated tests, and deployment checks where applicable.
 
-## Assets and security goals
-- Confidentiality and integrity of document bytes and metadata.
-- Correct per-document grants and immediate revocation.
-- Audit records that reveal successful and refused access attempts and make tampering detectable.
-- Login sessions, passwords, and account-role assignments.
+## 1. Assets and Security Goals
 
-## Trust boundaries
-- Browser to Flask application over HTTPS in production.
-- Flask application to PostgreSQL/SQLite.
-- User-controlled filenames, form fields, search filters, and uploaded bytes.
-- Admin audit view versus document-content access. An admin role does **not** implicitly grant access to document bytes.
+The primary assets and security goals are:
 
-## Roles and authorization rules
-- **admin:** can inspect account metadata and audit events; does not automatically read, edit, download, grant access to, or delete document content.
-- **owner:** can upload, read, edit metadata, delete their own documents, and grant/revoke named-user read/edit permissions. **admin:** can manage accounts/audit activity and can upload/manage documents the admin personally owns; admin role alone never grants access to other users’ documents.
-- **viewer (read-only account):** can read/download documents with a `read` or `edit` grant. A user with an `edit` grant can edit metadata, but cannot delete or share the document. Role alone never grants access to a document. Public sign-up now creates a normal `owner` account so each person can upload and manage their own documents.
-- All document operations re-check the current database grant. No long-lived signed file URLs are issued. Revocation therefore applies to the next request.
+* Confidentiality and integrity of document contents and metadata.
+* Correct enforcement of per-document permissions and immediate access revocation.
+* Audit records of successful and denied access attempts, with tampering detectable through verification.
+* Protection of login sessions, password hashes, and account-role assignments.
+* Availability and reliability of document management and authentication services.
+* Protection of configuration secrets and database credentials.
 
-## Threats, controls and tests
+## 2. Trust Boundaries
 
-| Threat | Control | Verification |
-|---|---|---|
-| Unauthenticated request reaches document routes | Flask-Login on protected routes | `test_unauthenticated_cannot_view_documents` |
-| Guessing another document's integer ID (IDOR) | Every detail/download/edit/delete/grant route checks ownership/grant on the server; inaccessible resources return 404 | `test_user_cannot_read_or_download_another_users_document`, `test_read_grant_cannot_edit_or_delete` |
-| Read grant is escalated to edit/delete/share | Separate `can_edit` and owner-only `can_delete` checks; only owner can manage grants | `test_read_grant_cannot_edit_or_delete` |
-| Access remains after revocation | Grant is deleted in DB; authorization checks DB on every request | `test_grant_then_revoke_takes_effect_immediately` |
-| Admin role becomes a universal document bypass | Admin content access is not implicit | `test_admin_role_does_not_implicitly_grant_document_content_access` |
-| Spoofed extension / malformed file | Extension allowlist, size limit, signature or structural checks for supported types | `test_invalid_file_signature_is_rejected` |
-| Audit rows, ordering, or head pointer are modified | Hash-linked events; verification checks event hashes, previous links, and terminal hash against `AuditHead.last_hash` | `test_audit_chain_detects_tampering`, `test_audit_chain_detects_head_row_tampering` |
-| Failed access attempt is invisible | Denied read/download/edit/delete/share attempts are recorded before returning 404/403 | IDOR tests inspect `denied_read` and `denied_download` events |
-| Cross-site request forgery on form actions | Flask-WTF CSRF tokens on POST forms | `test_csrf_rejects_login_post_without_token`; CSRF is enabled by default |
-| Open redirect after login, including scheme-relative/backslash variants | `next` is accepted only as a local absolute path with no scheme, host, or backslash; malformed URL parsing is rejected | `test_login_next_parameter_cannot_redirect_off_site` |
-| Password disclosure in source | Password hashes stored; seed passwords injected through environment variables in deployment | Inspect DB; ensure Render secrets are set and not committed |
-| SQL injection through search fields | SQLAlchemy parameterized query expressions; no raw user-built SQL | Search with quotes and SQL-looking strings; verify normal results/no server error |
-| Audit chain is tampered with by a database administrator | Hash chain detects many changes but does not defeat an attacker who can rewrite the entire database and chain head | **Accepted limitation:** production-grade evidence should also stream events to external append-only/WORM storage and restrict DB credentials |
-| Stored file malware or parser exploit | File type and size checks; files are downloaded as attachments, not rendered inline | **Accepted limitation:** no antivirus scanning or content disarm/reconstruction in this version |
-| Brute-force login and registration spam | Login POST is limited to 10/minute and registration POST to 5/hour per client address; generic failures and audit events remain | `test_login_is_rate_limited`; residual risk: in-memory counters are process-local; configure shared Redis for multi-instance deployments |
-| Demo accounts are publicly known | Separate environment-configurable passwords | **Required before deployment:** set strong unique `SEED_*_PASSWORD` values in Render; README demo credentials are for local evaluation only |
-| Browser clickjacking/content sniffing/cached private pages | CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy and no-store on dynamic responses | `test_security_headers_are_set`; inspect response headers on the live deployment |
-| Sensitive file bytes stored in database | Access is through protected Flask routes, not public object URLs | **Accepted limitation:** database/storage encryption-at-rest depends on hosting provider; application-level encryption is not implemented |
+TrustVault has the following trust boundaries:
 
-## Residual risks and deliberately omitted features
-- Public account registration is implemented and creates a normal document-owning account; registration does not automatically authenticate the new account. Password reset, MFA and SSO are not implemented.
-- No virus scanning, document version history, retention automation, or recovery bin.
-- The audit chain is tamper-evident, not cryptographically immutable against a fully privileged database operator. External log anchoring is the next improvement.
-- SQLite is for local development/tests. Use Render PostgreSQL for deployment. The file bytes are stored as database BLOB/BYTEA values to avoid ephemeral local filesystem storage on a free web service; the 5 MB limit keeps this practical for the challenge.
-- No external/guest users, group grants, or folder inheritance. Permissions are direct per-document grants only.
+* **Browser to Flask application:** Production traffic should use HTTPS.
+* **Flask application to database:** The application accesses document metadata, permissions, document bytes, and audit records.
+* **User-controlled input:** Filenames, uploaded bytes, form fields, search filters, and URL parameters must be treated as untrusted.
+* **Administrative functions versus document access:** Administrative access to account information and audit events does not automatically grant access to document contents.
+* **Application to hosting infrastructure:** Database persistence, encryption at rest, service availability, and network security depend partly on the hosting provider and deployment configuration.
 
-## Deployment verification checklist
-1. Set a random `SECRET_KEY`, unique `SEED_ADMIN_PASSWORD`, `SEED_OWNER_PASSWORD`, and `SEED_VIEWER_PASSWORD`; set `COOKIE_SECURE=true`.
-2. Use Render's internal PostgreSQL connection string; do not use SQLite for a deployed instance.
-3. Open the live URL in a private/incognito window and sign in with each role.
-4. Create a document as owner; confirm an ungranted viewer cannot view/download it by guessing its URL.
-5. Grant read access, verify download, revoke, and immediately retry the same URL.
-6. Confirm a read-only grantee cannot edit, delete, or grant access.
-7. Confirm admin can inspect the audit page but cannot read a document without a grant.
-8. Check the audit chain status after upload, download, denied access, grant, and revoke.
+## 3. Roles and Authorization Rules
 
+### Admin
 
-## Additional checks added during UI/access workflow revision
+* Can inspect account metadata and audit activity.
+* Can manage accounts through the application's administrative functions.
+* Can upload and manage documents that the admin personally owns.
+* Does not automatically gain permission to read, download, edit, delete, or share another user's documents.
 
-- **Upload is not discoverable for an admin:** admins may upload a document they own, but cannot read another owner's document by virtue of role. Regression test: `test_admin_can_upload_only_a_document_they_own`.
-- **Share/manage-access URL guessing:** `GET /documents/<id>/share` requires document ownership and returns the same not-found response for a non-owner. Regression test: `test_manage_access_page_is_owner_only`.
-- **Category filtering:** category chips only alter the search query; they do not broaden the server-side visible-document query. Document visibility is always restricted to owned documents or explicit grants.
+### Owner
 
+* Can upload and organize documents.
+* Can read and download documents they own.
+* Can edit permitted document metadata and delete their own documents.
+* Can grant or revoke named users' read or edit permissions for their documents.
+* Cannot access another user's document merely because they have an owner role.
 
-## Registration policy update (2026-10-24)
+### Viewer and Other Registered Users
 
-- Public registration creates `owner`, which means the person may upload, edit, delete, and share documents they own. It does **not** grant access to documents owned by anyone else.
-- The role supplied in a registration form is ignored. The public endpoint never creates `admin`.
-- On startup, existing `viewer` accounts are migrated to `owner`, except the dedicated `viewer@trustvault.local` demo account used for negative-access demonstrations. Each migration is recorded in the audit trail. Review this exception if changing demo account conventions.
-- Read/edit sharing remains per-document and server-enforced. An account can be an owner of its own documents while holding read/edit grants on other users’ documents.
+* Public registration creates a normal `owner` account so the user can manage their own documents.
+* A user with a read grant can read or download the shared document.
+* A user with an edit grant can read or download the document and edit permitted metadata.
+* An edit grant does not grant permission to delete the document or manage its sharing permissions.
+* A user's role alone does not grant access to another user's document.
+* The dedicated demo viewer account is used to demonstrate denied access and sharing behavior.
 
+### Authorization Enforcement
 
-## Authentication entry-point review (2026-10-24)
-- The workspace route (`/`) and every document route must require an authenticated session; anonymous visitors should be redirected to `/login`. Public routes are limited to login, registration, static assets, and the health check.
-- Registration creates an `owner` account but does not automatically sign the person in; successful registration redirects to the login form. This makes the login/signup screen the initial experience for a new visitor.
-- The session cookie name was versioned to invalidate old cookies from the previous build that may make the new app appear to skip login.
-- Production must use a random `SECRET_KEY` of at least 32 characters and unique `SEED_*_PASSWORD` values of at least 12 characters; startup fails if these are missing, and existing demo-account passwords are rotated to configured values if they differ.
-- Automated tests added for anonymous access to the workspace, upload, document, download, share, and admin routes, plus forged-role registration. Run these tests locally before submission and record the actual result.
+* Document access is checked on the server for each protected request.
+* The application checks current ownership or document-specific grants rather than relying only on the user interface.
+* Revocation removes the grant, so subsequent requests must be denied unless another valid permission exists.
+* Public registration must never allow a user to assign themselves the admin role by submitting a modified form.
 
+## 4. Threats, Controls, and Verification
 
-## Additional hardening review (2026-10-24)
+| Threat                                                      | Control or Mitigation                                                                                                                     | Verification                                                                                                 |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Unauthenticated users access protected document routes      | Flask-Login protects private routes.                                                                                                      | `test_unauthenticated_cannot_view_documents` and related private-route tests.                                |
+| A user guesses another document's integer ID (IDOR)         | Server-side ownership and grant checks are applied to document operations. Inaccessible resources return an appropriate denial response.  | `test_user_cannot_read_or_download_another_users_document`                                                   |
+| A read-only user edits or deletes a document                | Read and edit permissions are checked separately. Deletion and sharing management require ownership.                                      | `test_read_grant_cannot_edit_or_delete`                                                                      |
+| Access remains after a grant is revoked                     | Permissions are checked against current database state on subsequent requests.                                                            | `test_grant_then_revoke_takes_effect_immediately`                                                            |
+| Admin role becomes a universal document-access bypass       | Administrative privileges do not automatically grant access to other users' document contents.                                            | `test_admin_role_does_not_implicitly_grant_document_content_access`                                          |
+| An attacker submits a forged role during registration       | Public registration assigns the permitted role on the server instead of trusting a submitted role value.                                  | `test_forged_admin_registration_rejected`                                                                    |
+| Invalid or spoofed uploads bypass basic validation          | Upload extension, size, and supported-file content checks are applied. DOCX files also receive archive-size checks.                       | `test_invalid_file_signature_is_rejected` and related upload tests.                                          |
+| Unauthorized attempts are absent from the audit trail       | Denied document-access attempts are recorded before the request is rejected, where implemented by the relevant route.                     | IDOR tests inspect denied-read and denied-download events.                                                   |
+| Audit events are modified or removed                        | Events are linked using hashes and previous-hash values. Verification checks event hashes, links, and the stored terminal hash.           | `test_audit_chain_detects_tampering` and `test_audit_chain_detects_head_row_tampering`                       |
+| Cross-site request forgery (CSRF)                           | Flask-WTF CSRF protection is enabled for applicable form submissions.                                                                     | `test_csrf_rejects_login_post_without_token`                                                                 |
+| Login redirects to an attacker-controlled site              | The login redirect parameter is restricted to acceptable local paths; unsafe URL forms are rejected.                                      | `test_login_next_parameter_cannot_redirect_off_site`                                                         |
+| Passwords are exposed in source code                        | Passwords should be stored as hashes. Deployment seed passwords are supplied through environment variables rather than committed secrets. | Review account creation and password-hashing code; check deployment secrets.                                 |
+| SQL injection through search filters                        | SQLAlchemy query expressions are used instead of constructing raw SQL from user-controlled input.                                         | Review query construction and test search inputs containing quotes and SQL-like strings.                     |
+| Brute-force login attempts                                  | Login POST requests are rate-limited per client address.                                                                                  | `test_login_is_rate_limited`                                                                                 |
+| Automated registration spam                                 | Registration POST requests are rate-limited per client address.                                                                           | Review the registration rate-limit configuration and test behavior.                                          |
+| Publicly known demo passwords are reused in production      | Production must use strong, unique environment-configured seed passwords.                                                                 | Verify Render environment variables and ensure production credentials are not the documented local defaults. |
+| Clickjacking, content sniffing, or caching of private pages | Security response headers and no-store behavior are configured.                                                                           | `test_security_headers_are_set`; inspect response headers on the deployed application.                       |
+| Private document bytes are exposed through public file URLs | Document bytes are served through application routes protected by authorization checks rather than public object URLs.                    | Test document download routes with authorized and unauthorized accounts.                                     |
 
-- Login and registration POSTs now have per-client rate limits. The default `memory://` store is process-local; use a shared Redis-compatible `RATELIMIT_STORAGE_URI` if running multiple instances. The included Render configuration uses one Gunicorn worker to avoid splitting counters between workers by default. A single IP may still represent multiple users behind a NAT, and distributed attackers can evade per-address limits.
-- Audit verification now checks the stored terminal head hash as well as each event hash and previous-hash link. This remains tamper-evident rather than immutable.
-- Security response headers are added centrally, including CSP, `X-Frame-Options`, `X-Content-Type-Options`, referrer and permissions policies, HSTS when secure cookies are enabled, and no-store for dynamic responses. JavaScript was moved to same-origin static files so the CSP does not need `unsafe-inline` for scripts; inline styles remain permitted for CSS effects.
-- DOCX uploads are bounded by both compressed upload size and total uncompressed archive size. Files remain served as attachments after an authorization check.
-- Startup schema creation/seeding is no longer run in each Gunicorn worker. The Render start command applies the Alembic baseline, runs the one-time initialization/seeding script, and then starts a single worker. Future schema changes need reviewed migrations and database backups.
-- Verification status: syntax and archive checks can be performed before packaging, but full runtime tests must be run in an environment where requirements install successfully. Do not claim the suite passes until local output confirms it.
+## 5. Accepted Limitations and Residual Risks
+
+### Audit Trail
+
+The audit chain is tamper-evident, not cryptographically immutable against an attacker who can rewrite the entire database and its chain head.
+
+A production deployment requiring stronger audit evidence should send events to independently controlled append-only or WORM storage, restrict database credentials, and consider external anchoring of audit hashes.
+
+### Malicious Files
+
+File extension, size, and content checks reduce the risk of accepting invalid uploads but do not establish that every uploaded file is safe.
+
+This version does not include antivirus scanning or content disarm and reconstruction. A malicious document could still pose a risk to a user who opens it with a vulnerable local application.
+
+### Encryption at Rest
+
+Application-level encryption of stored document bytes is not implemented. Encryption at rest depends on the database and hosting provider's configuration and guarantees.
+
+### Rate Limiting
+
+The default `memory://` rate-limit store is process-local. Counters may reset when the process restarts, and multiple workers or instances may not share counters.
+
+The current Render configuration uses one Gunicorn worker by default. A scaled deployment should use a shared Redis-compatible rate-limit store.
+
+Per-address rate limits can affect multiple legitimate users behind the same NAT and may be bypassed by attackers distributing requests across addresses.
+
+### Authentication Features
+
+The application does not include multi-factor authentication, single sign-on, or a password-reset workflow in this version.
+
+### Document Management
+
+The application does not include document version history, automated retention, a recovery bin, group-based grants, folder permission inheritance, or external guest accounts.
+
+### Hosting and Availability
+
+The free hosting configuration may experience cold starts, resource limits, or service interruptions. Free database availability and retention are governed by the hosting provider's current policies.
+
+A production deployment should use appropriate backups, recovery procedures, monitoring, and hosting capacity.
+
+## 6. File Upload and Storage Security
+
+* The application enforces a maximum upload size configured through `MAX_CONTENT_LENGTH`.
+* Supported file types are restricted by the application's upload-validation logic.
+* Supported file types receive the applicable signature or structural checks.
+* DOCX archive contents are checked against configured size limits to reduce archive-expansion risks.
+* Uploaded bytes are stored in the database to avoid dependence on ephemeral local filesystems in the deployed environment.
+* Document downloads pass through protected application routes.
+* Files are served as attachments rather than intentionally rendered inline.
+* File validation does not replace antivirus scanning or a comprehensive malware-analysis process.
+
+The configured upload limit is 5 MB. Any change to the supported file types or size limits should be accompanied by appropriate tests.
+
+## 7. Account Registration and Provisioning
+
+* Public registration creates an owner account.
+* Public registration must not allow users to select or obtain the admin role by changing submitted form fields.
+* Registration does not automatically authenticate the new account; successful registration redirects the user to the login page.
+* Administrative account provisioning is restricted to authorized administrative functionality.
+* Existing account-role migration behavior should be reviewed whenever the account model or demo-account conventions change.
+* The dedicated demo viewer account is an exception to the migration of legacy viewer accounts to owner accounts.
+* Production seed passwords must be configured through secure environment variables and must not reuse local demonstration credentials.
+
+## 8. Automated Test Coverage
+
+The local test run previously reported **26 passing tests**.
+
+The reported test coverage includes:
+
+* Registration and authentication behavior.
+* Protection of private routes against anonymous access.
+* Document upload, search, editing, downloading, and deletion.
+* Document ownership and per-document permission enforcement.
+* Granting and revoking document access.
+* Restrictions on read-only and edit-only grants.
+* Administrative access boundaries.
+* Upload validation.
+* Audit-chain and audit-head tampering detection.
+* Denied-access audit events.
+* CSRF protection.
+* Login rate limiting.
+* Security response headers.
+* Protection against unsafe post-login redirects.
+
+The test count and results should be rechecked after any code or test changes.
+
+Run the test suite from the project directory using:
+
+```powershell
+python -m pytest -v
+```
+
+Do not describe a test as passing unless the actual test output confirms it.
+
+## 9. Deployment Verification Checklist
+
+Complete these checks against the actual deployed application before submission.
+
+### Configuration
+
+* [ ] Set a strong, random production `SECRET_KEY`.
+* [ ] Set unique, strong `SEED_ADMIN_PASSWORD`, `SEED_OWNER_PASSWORD`, and `SEED_VIEWER_PASSWORD` values.
+* [ ] Confirm production cookies use `COOKIE_SECURE=true`.
+* [ ] Confirm the deployed service uses the intended PostgreSQL database connection.
+* [ ] Confirm no real credentials, private keys, or `.env` files are committed to Git.
+* [ ] Confirm the deployment starts successfully and the health endpoint responds.
+
+### Authentication and Authorization
+
+* [ ] Open the live URL in a private/incognito browser window and verify that private pages require authentication.
+* [ ] Register a new account and verify that registration does not automatically sign the user in.
+* [ ] Sign in with the appropriate test accounts.
+* [ ] Create a document as an owner.
+* [ ] Verify that an ungranted user cannot view or download that document, including by guessing its URL.
+* [ ] Grant read access and verify that the recipient can read or download the document.
+* [ ] Revoke the grant and retry the same request; verify that access is denied.
+* [ ] Verify that a read-only grantee cannot edit, delete, or share the document.
+* [ ] Verify that an edit grantee can perform permitted metadata edits but cannot delete or share the document.
+* [ ] Verify that an admin can inspect administrative audit information but cannot read another user's document without permission.
+
+### Audit and Response Headers
+
+* [ ] Confirm that upload, download, permission changes, and relevant denied attempts create the expected audit events.
+* [ ] Check the audit-chain verification result after performing representative actions.
+* [ ] Inspect the live response headers and verify the expected security headers are present.
+* [ ] Confirm that private responses use the intended cache-control policy.
+
+Only mark a checklist item complete after observing the result.
+
+## 10. Final Security Statement
+
+TrustVault implements authentication, server-side document authorization, named-user permissions, revocation checks, upload validation, audit-chain verification, and several web-security protections.
+
+These controls address the threats identified in this document, but they do not guarantee that the application is free of vulnerabilities. Remaining limitations include the absence of antivirus scanning, application-level encryption at rest, externally immutable audit storage, and several advanced authentication and recovery features.
+
+The security posture should be reassessed whenever authorization logic, upload handling, account provisioning, audit behavior, database configuration, or deployment architecture changes.
